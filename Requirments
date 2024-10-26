@@ -1,0 +1,8 @@
+ERH prior Auth code suggestions and success rate tracking
+
+Build a sample ERH tool with fake patient records 
+Create a field for doctors to input a test or medication they are seeking authorization for
+Logic behind this field will suggest codes based on patient record and history, insurnace company and whatever the doctor is requesting
+Overtime suggested codes will get more accurate for approval success based on prior data. 
+
+Patient Generator - 
