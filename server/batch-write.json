@@ -1,0 +1,20 @@
+{
+  "4Three": [
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": { "S": "unique_id_1" },
+          "AttributeName": { "S": "AttributeValue1" }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": { "S": "unique_id_2" },
+          "AttributeName": { "S": "AttributeValue2" }
+        }
+      }
+    }
+  ]
+}
