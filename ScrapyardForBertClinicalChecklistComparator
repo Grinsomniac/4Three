@@ -1,0 +1,329 @@
+import re
+import torch
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+import PyPDF2
+
+# Function to normalize text
+def normalize_text(text):
+    text = re.sub(r'\s+', ' ', text)  # Collapse multiple spaces
+    text = re.sub(r'\s([.,;:?!])', r'\1', text)  # Remove spaces before punctuation
+    return text
+
+# Function to read text from a file
+def read_text_from_file(file_path):
+    with open(file_path, 'r') as file:
+        return file.read()
+
+# Function to filter and extract only the relevant criteria section
+def filter_criteria_section(text):
+    start_keyword = "2. Reauthorization"
+    end_keyword = "3. Additional Clinical Rules"
+    
+    start_index = text.find(start_keyword)
+    end_index = text.find(end_keyword, start_index)
+
+    if start_index == -1 or end_index == -1:
+        raise ValueError("Coverage Criteria section not found in the text.")
+
+    return text[start_index:end_index].strip()
+
+# Load and filter criteria from the txt file
+raw_text = read_text_from_file('Tagrisso.txt')
+filtered_criteria_text = filter_criteria_section(normalize_text(raw_text))
+
+# Load the patient history from the txt file
+history_text = normalize_text(read_text_from_file('patient_history.txt'))
+
+# Initialize the tokenizer and model for parsing
+tokenizer = AutoTokenizer.from_pretrained("bert-large-uncased")
+model = AutoModelForSequenceClassification.from_pretrained("bert-large-uncased")
+
+# Helper function to create a hierarchical dictionary
+def create_criteria_dict(text):
+    criteria_dict = {}
+    current_level1, current_level2, current_level3 = None, None, None
+    # Split the text more effectively using proper delimiters
+    
+    items = re.split(r'(?<!-OR)\n(?=\b[A-Z]\.\s|\d\.\s|[a-z]\.\s|[(i|a)\.\s])', text)
+    for item in items:
+        item = item.strip()
+        if not item:
+            continue
+        print(f"Processing item: {item}")  # Debug statement
+        if re.match(r'^[A-Z]\.\s', item):  # Level 1 (A., B., C.)
+            current_level1 = item
+            criteria_dict[current_level1] = {}
+            current_level2, current_level3 = None, None
+            print(f"Added level 1: {current_level1}")  # Debug statement
+        elif re.match(r'^\d\.\s', item):  # Level 2 (1., 2., 3.)
+            if current_level1 is None:
+                print(f"Skipping level 2 without level 1 context: {item}")  # Debug statement
+                continue  # Skip unexpected Level 2 without Level 1
+            current_level2 = item
+            criteria_dict[current_level1][current_level2] = {}
+            current_level3 = None
+            print(f"Added level 2: {current_level2} under {current_level1}")  # Debug statement
+        elif re.match(r'^[a-z]\.\s', item):  # Level 3 (a., b., c.)
+            if current_level1 is None or current_level2 is None:
+                print(f"Skipping level 3 without level 1 or level 2 context: {item}")  # Debug statement
+                continue  # Skip unexpected Level 3 without Level 1 or Level 2
+            current_level3 = item
+            criteria_dict[current_level1][current_level2][current_level3] = []
+            print(f"Added level 3: {current_level3} under {current_level2} and {current_level1}")  # Debug statement
+        else:  # Level 4 or further descriptions
+            if current_level1 is None or current_level2 is None or current_level3 is None:
+                print(f"Skipping sub-criteria without context: {item}")  # Debug statement
+                continue  # Skip unexpected sub-criteria without context
+            criteria_dict[current_level1][current_level2][current_level3].append(item)
+            print(f"Added sub-criteria under {current_level3}, {current_level2}, {current_level1}")  # Debug statement
+    return criteria_dict
+
+# Create the hierarchical dictionary for criteria
+criteria_dict = create_criteria_dict(filtered_criteria_text)
+print(f"Final Criteria Dictionary: {criteria_dict}")  # Debug statement
+
+# Initialize the tokenizer and model for parsing
+tokenizer = AutoTokenizer.from_pretrained("bert-large-uncased")
+model = AutoModelForSequenceClassification.from_pretrained("bert-large-uncased")
+
+# Helper function to create a hierarchical dictionary
+def create_criteria_dict(text):
+    criteria_dict = {}
+    current_level1, current_level2, current_level3 = None, None, None
+    for item in text.split('\n'):
+        item = item.strip()
+        if not item:
+            continue
+        print(f"Processing item: {item}")  # Debug statement
+        if re.match(r'^[A-Z]\.\s', item):  # Level 1
+            current_level1 = item
+            criteria_dict[current_level1] = {}
+            current_level2, current_level3 = None, None
+            print(f"Added level 1: {current_level1}")  # Debug statement
+        elif re.match(r'^\d\.\s', item):  # Level 2
+            if current_level1 is None:
+                print(f"Skipping level 2 without level 1 context: {item}")  # Debug statement
+                continue  # Skip unexpected Level 2 without Level 1
+            current_level2 = item
+            criteria_dict[current_level1][current_level2] = {}
+            current_level3 = None
+            print(f"Added level 2: {current_level2} under {current_level1}")  # Debug statement
+        elif re.match(r'^[a-z]\.\s', item):  # Level 3
+            if current_level1 is None or current_level2 is None:
+                print(f"Skipping level 3 without level 1 or level 2 context: {item}")  # Debug statement
+                continue  # Skip unexpected Level 3 without Level 1 or Level 2
+            current_level3 = item
+            criteria_dict[current_level1][current_level2][current_level3] = []
+            print(f"Added level 3: {current_level3} under {current_level2} and {current_level1}")  # Debug statement
+        else:  # Level 4 or further descriptions
+            if current_level1 is None or current_level2 is None or current_level3 is None:
+                print(f"Skipping sub-criteria without context: {item}")  # Debug statement
+                continue  # Skip unexpected sub-criteria without context
+            criteria_dict[current_level1][current_level2][current_level3].append(item)
+            print(f"Added sub-criteria under {current_level3}, {current_level2}, {current_level1}")  # Debug statement
+    return criteria_dict
+
+# Initialize a pipeline for similarity check
+similarity_pipeline = pipeline("feature-extraction", model=model, tokenizer=tokenizer, device=0 if torch.cuda.is_available() else -1)
+
+# Helper function to compute similarity
+def compute_similarity(text1, text2):
+    embeddings1 = similarity_pipeline(text1)
+    embeddings2 = similarity_pipeline(text2)
+    embeddings1 = torch.tensor(embeddings1).mean(dim=1)
+    embeddings2 = torch.tensor(embeddings2).mean(dim=1)
+    cosine_sim = torch.nn.functional.cosine_similarity(embeddings1, embeddings2).item()
+    return cosine_sim
+
+# Check how much the criteria in the dictionary match up with the patient history
+def evaluate_criteria_against_history(criteria_dict, history_text):
+    results = {}
+    for level1, level2_info in criteria_dict.items():
+        results[level1] = {}
+        for level2, level3_info in level2_info.items():
+            results[level1][level2] = {}
+            for level3, sub_criteria in level3_info.items():
+                full_text = level3 + " " + " ".join(sub_criteria)  # Combine the sub-criteria
+                similarity_score = compute_similarity(full_text, history_text)
+                results[level1][level2][level3] = 'Met' if similarity_score > 0.5 else 'Not Met'
+    return results
+
+# Evaluate the criteria
+results = evaluate_criteria_against_history(criteria_dict, history_text)
+
+# Print the results
+print("Summary of criteria assessment:")
+for level1, level2_info in results.items():
+    print(f"{level1}:")
+    for level2, level3_info in level2_info.items():
+        print(f"  {level2}:")
+        for level3, result in level3_info.items():
+            print(f"    {level3}: {result}")
+
+# Debug information
+print("Extracted Criteria Dict:\n", criteria_dict)
+
+# "2. Cover age Criteria"
+#"3. Additional Clinical Rule s"
+# Function to normalize text
+# Function to normalize text
+# Function to normalize text
+def normalize_text(text):
+    text = re.sub(r'\s+', ' ', text)  # Collapse multiple spaces
+    text = re.sub(r'\s([.,;:?!])', r'\1', text)  # Remove spaces before punctuation
+    return text
+
+# Function to extract the specific section from the TXT file
+def extract_coverage_criteria(txt_path):
+    with open(txt_path, 'r') as file:
+        text = file.read()
+
+    # Normalize the text
+    text = normalize_text(text)
+    
+    # Extract only the "2. Reauthorization" section up to "3. Additional Clinical Rules:"
+    start_index = text.find("2. Reauthorization")
+    end_index = text.find("3. Additional Clinical Rules:", start_index)
+    
+    if start_index == -1 or end_index == -1:
+        raise ValueError("Coverage Criteria section not found in the text.")
+    
+    criteria_text = text[start_index:end_index].strip()
+    print("Extracted Criteria Text:\n", criteria_text)  # Debug statement
+
+    # Split and structure the criteria
+    raw_criteria_list = re.split(r'\n{1,2}(?=[A-Z]\.|[0-9]\.|[-a-z]\))', criteria_text)
+    print("Raw criteria list:\n", raw_criteria_list)  # Debug statement
+    
+    # Structure the text into comprehensive sub-criteria
+    criteria_dict = {}
+    current_level1, current_level2, current_level3 = None, None, None
+
+    for item in raw_criteria_list:
+        item = item.strip()
+        print("Processing item:", item)  # Debug statement
+        if re.match(r'^[A-Z]\.\s', item):  # Level 1 (e.g., "A.", "B.")
+            current_level1 = item
+            criteria_dict[current_level1] = {}
+            current_level2, current_level3 = None, None
+        elif re.match(r'^\d\.\s', item):  # Level 2 (e.g., "1.", "2.")
+            if current_level1 is None:
+                print("Skipping level 2 without level 1 context:", item)  # Debug statement
+                continue  # Skip unexpected Level 2 without Level 1
+            current_level2 = item
+            criteria_dict[current_level1][current_level2] = {}
+            current_level3 = None
+        elif re.match(r'^[a-z]\.\s', item):  # Level 3 (e.g., "a.", "b.")
+            if current_level1 is None or current_level2 is None:
+                print("Skipping level 3 without level 1 or level 2 context:", item)  # Debug statement
+                continue  # Skip unexpected Level 3 without Level 1 or Level 2
+            current_level3 = item
+            criteria_dict[current_level1][current_level2][current_level3] = []
+        else:  # Level 4 or further descriptions
+            if current_level1 is None or current_level2 is None or current_level3 is None:
+                print("Skipping sub-criteria without context:", item)  # Debug statement
+                continue  # Skip unexpected sub-criteria without context
+            criteria_dict[current_level1][current_level2][current_level3].append(item)
+    
+    print("Final structured criteria dictionary:\n", criteria_dict)  # Debug statement
+    return criteria_dict
+
+# Load the patient history into a string
+def extract_text_from_txt(txt_path):
+    with open(txt_path, 'r') as file:
+        text = file.read()
+    return text
+
+# Paths to the files
+criteria_path = 'Tagrisso.txt'
+history_path = 'patient_history.txt'
+
+# Extracting texts
+criteria_dict = extract_coverage_criteria(criteria_path)
+history_text = normalize_text(extract_text_from_txt(history_path))
+
+if not criteria_dict or not history_text:
+    raise ValueError("Criteria or patient history text is empty. Please check the files.")
+# Using a more advanced model from Hugging Face for better comprehension
+tokenizer = AutoTokenizer.from_pretrained("bert-large-uncased")
+model = AutoModelForSequenceClassification.from_pretrained("bert-large-uncased", num_labels=len(criteria))
+
+# Tokenize the patient history
+patient_tokens = tokenizer([history_text], return_tensors="pt", padding=True, truncation=True)
+
+# Ensure criteria are non-empty for tokenization, add check for empty criteria elements
+criteria_tokens = tokenizer([c for c in criteria if c], return_tensors="pt", padding=True, truncation=True)
+
+# Get embeddings for the patient history and criteria
+with torch.no_grad():
+    patient_embeddings = model(**patient_tokens).logits
+    criteria_embeddings = model(**criteria_tokens).logits
+
+# Calculate cosine similarity between patient history and each criterion
+cosine_similarity = torch.nn.CosineSimilarity(dim=1)
+similarities = cosine_similarity(patient_embeddings, criteria_embeddings)
+
+# Determine if each criterion is met and compile the results
+results = {criterion: 'Met' if similarities[i] > 0.5 else 'Not Met' for i, criterion in enumerate(criteria)}
+
+# Print the results
+print("Summary of criteria assessment:")
+for criterion, status in results.items():
+    print(f"{criterion}: {status}")
+
+# Load the tokenizer and model
+tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=len(criteria))
+
+# Tokenize the patient history
+patient_tokens = tokenizer([history_text], return_tensors="pt", padding=True, truncation=True)
+
+# Tokenize the criteria
+criteria_tokens = tokenizer(criteria, return_tensors="pt", padding=True, truncation=True)
+
+# Get embeddings for the patient history and criteria
+with torch.no_grad():
+    patient_embeddings = model(**patient_tokens).logits
+    criteria_embeddings = model(**criteria_tokens).logits
+# Calculate cosine similarity between patient history and each criterion
+cosine_similarity = torch.nn.CosineSimilarity(dim=1)
+similarities = cosine_similarity(patient_embeddings, criteria_embeddings)
+
+# Find the most similar criterion's index
+closest_criterion_index = similarities.argmax().item()
+
+# Print the criterion most closely related to the patient's history
+print("The drug approval criterion that is most closely related to the patient's history is:", criteria[closest_criterion_index])
+
+# Check if patient's history meets the criteria
+threshold = 0.5  # Adjust the threshold based on your requirement
+if similarities[closest_criterion_index] > threshold:
+    print("The patient's history meets the drug approval criteria.")
+else:
+    print("The patient's history does not meet the drug approval criteria.")
+
+# Print criteria that are not met
+for i, similarity_score in enumerate(similarities):
+    if similarity_score <= threshold:
+        print(f"Criteria not met: {criteria[i]}")
+
+def extract_text_from_pdf(pdf_path):
+    pdf_reader = PyPDF2.PdfReader(open(pdf_path, "rb"))
+    text = ""
+    for page_num in range(len(pdf_reader.pages)):
+        page = pdf_reader.pages[page_num]
+        text += page.extract_text()
+    return text.strip().split('\n')  # Splitting criteria by lines
+
+# Load the patient history into a string
+def extract_text_from_txt(txt_path):
+    with open(txt_path, 'r') as file:
+        text = file.read()
+    return text
+
+# Paths to the files
+pdf_path = 'drug_approval_criteria.pdf'
+txt_path = 'patient_history.txt'
+
+criteria = extract_text_from_pdf(pdf_path)
+history_text = extract_text_from_txt(txt_path)
