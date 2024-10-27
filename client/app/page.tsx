@@ -1,6 +1,10 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
+import DrugList from "./components/DrugList";
+import PatientSummary from "./components/PatientSummary";
+import Stats from "./components/Stats";
+import axios from "axios";
 
 export default function Home() {
   const [data, setData] = useState([]); // State to hold fetched data
@@ -8,21 +12,15 @@ export default function Home() {
   const fetchData = async () => {
     console.log("Fetching data..."); // Log to confirm function call
     try {
-      const response = await fetch("http://localhost:5000/get_data", {
-        method: "GET",
+      const response = await axios.get("http://127.0.0.1:5000/get_data", {
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: "include",
+        withCredentials: true, // This is equivalent to `credentials: "include"`
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`); // Handle non-2xx responses
-      }
-
-      const json_data = await response.json();
-      console.log("Fetched data:", json_data); // Log fetched data
-      setData(json_data.items || json_data); // Adjust according to the expected structure
+      console.log("Fetched data:", response.data); // Log fetched data
+      setData(response.data.Items); // Adjust according to expected structure
     } catch (error) {
       console.error("Fetch error:", error); // Log error for debugging
     }
@@ -34,25 +32,10 @@ export default function Home() {
   }, []);
 
   return (
-    <div>
-      <h1>Fetched Data</h1>
-      <ul>
-        {data.length > 0 ? (
-          data.map((item, index) => (
-            <li key={index}>{JSON.stringify(item)}</li> // Display each item; adjust as necessary
-          ))
-        ) : (
-          <li>No data available</li> // Show a message if no data is fetched
-        )}
-      </ul>
-      <button
-        onClick={() => {
-          console.log("Button clicked, fetching data...");
-          fetchData(); // Call fetchData again when button is clicked
-        }}
-      >
-        Fetch Data
-      </button>
+    <div className="grid grid-cols-3 gap-4 p-4">
+      <PatientSummary />
+      <DrugList data={data} />
+      <Stats />
     </div>
   );
 }
